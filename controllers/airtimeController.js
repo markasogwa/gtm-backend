@@ -2,7 +2,7 @@
 import mongoose from "mongoose";
 import { vtpassClient } from "../config/vtpassClient.js";
 import AirtimeTransaction from "../models/airtimeTransactions.js";
-import User from "../models/user.js"; // ✅ Replace WalletUpdate
+import User from "../models/User.js"; // ✅ Replace WalletUpdate
 import generateTransactionId from "../utils/generateTransactionId.js";
 import validateNigerianPhone from "../utils/phoneValidation.js";
 
