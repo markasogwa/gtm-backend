@@ -1,26 +1,54 @@
 import axios from "axios";
 import express from "express";
 import protect from "../middleware/authMiddleware.js";
-import User from "../models/User.js";
+import AirtimeTransaction from "../models/airtimeTransactions.js";
+import generateTransactionId from "../utils/generateTransactionId.js";
+
 const router = express.Router();
 
-// ===================== FUND WALLET =====================
-router.post("/fund", protect, async (req, res) => {
-  const { amount, email } = req.body;
+router.post("/airtime/init", protect, async (req, res) => {
+  const { phone, amount, network, variation_code } = req.body;
+  const userId = req.user._id;
 
-  if (!email || !amount || amount <= 0) {
-    return res.status(400).json({ error: "Invalid amount or email" });
+  if (!phone || !amount || !network) {
+    return res.status(400).json({ error: "All fields are required" });
   }
 
+  const numericAmount = Number(amount);
+  if (isNaN(numericAmount) || numericAmount <= 0) {
+    return res.status(400).json({ error: "Invalid amount" });
+  }
+
+  const transactionId = generateTransactionId();
+
   try {
+    // 1️⃣ Create PENDING AirtimeTransaction
+    await AirtimeTransaction.create({
+      transactionId,
+      user: userId,
+      type: "AIRTIME",
+      network,
+      phone,
+      serviceID: network.toLowerCase(),
+      variation_code,
+      amount: numericAmount, // VTU face value
+      amountPaid: numericAmount, // can adjust if you want markup
+      status: "PENDING",
+    });
+
+    // 2️⃣ Initialize Paystack payment
     const response = await axios.post(
       "https://api.paystack.co/transaction/initialize",
       {
-        email,
-        amount: amount * 100, // Paystack uses kobo
-        callback_url: "http://localhost:3000/payment-success", // Frontend success page
+        email: req.user.email,
+        amount: numericAmount * 100, // Paystack expects kobo
+        reference: transactionId,
+        callback_url: "http://localhost:3000/airtime/success",
         metadata: {
-          userId: req.user._id, // For webhook processing
+          transactionId, // track transaction in webhook
+          phone,
+          network,
+          variation_code,
         },
       },
       {
@@ -33,28 +61,13 @@ router.post("/fund", protect, async (req, res) => {
 
     const { authorization_url, reference } = response.data.data;
 
-    return res.status(200).json({
-      authorization_url,
-      reference,
-    });
+    return res.status(200).json({ authorization_url, reference });
   } catch (err) {
-    console.error("Paystack error:", err.response?.data || err.message);
+    console.error(
+      "Paystack initialization error:",
+      err.response?.data || err.message
+    );
     return res.status(500).json({ error: "Failed to initialize payment" });
-  }
-});
-
-// ✅ Get wallet balance
-router.get("/balance", protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select("wallet");
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    res.json({ balance: user.wallet });
-  } catch (err) {
-    console.error("Failed to fetch balance:", err.message);
-    res.status(500).json({ error: "Server error" });
   }
 });
 

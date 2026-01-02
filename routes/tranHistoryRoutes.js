@@ -1,7 +1,8 @@
 import express from "express";
 import protect from "../middleware/authMiddleware.js";
-import airtimeTransaction from "../models/airtimeTransactions.js";
-import walletTransaction from "../models/walletTransaction.js";
+import AirtimeTransaction from "../models/airtimeTransactions.js";
+import ElectricityTransaction from "../models/electricityTransactions.js";
+import TVTransaction from "../models/tvTransactions.js";
 
 const router = express.Router();
 
@@ -11,40 +12,82 @@ router.get("/user", protect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
 
-    // Fetch both types
-    const [walletTxns, airtimeTxns] = await Promise.all([
-      walletTransaction.find({ user: req.user._id }).lean(),
-      airtimeTransaction.find({ user: req.user._id }).lean(),
+    // const totalSpent = await Transaction.aggregate([
+    //   { $match: { user: req.user._id } },
+    //   { $group: { _id: null, total: { $sum: "$amount" } } },
+    // ]);
+
+    // res.json({
+    //   transactions,
+    //   totalPages: Math.ceil(totalCount / limit),
+    //   totalSpent: totalSpent[0]?.total || 0,
+    // });
+
+    // Fetch all transactions in parallel
+    const [airtimeTxns, electricityTxns, tvTxns] = await Promise.all([
+      AirtimeTransaction.find({ user: req.user._id }).lean(),
+      ElectricityTransaction.find({ user: req.user._id }).lean(),
+      TVTransaction.find({ user: req.user._id }).lean(),
     ]);
 
-    // Tag them with types
-    const walletHistory = walletTxns.map((txn) => ({
-      ...txn,
-      type: txn.type || "wallet funding",
-    }));
+    // Helper to sum amounts of successful transactions
+    const sumSuccessful = (txns) =>
+      txns
+        .filter(
+          (tx) =>
+            tx.status?.toLowerCase() === "success" ||
+            tx.status?.toLowerCase() === "successful"
+        )
+        .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
-    const airtimeHistory = airtimeTxns.map((txn) => ({
+    // Then compute totalSpent like this:
+    const totalSpent =
+      sumSuccessful(airtimeTxns) +
+      sumSuccessful(electricityTxns) +
+      sumSuccessful(tvTxns);
+
+    // Tag transaction types for clarity
+    const taggedAirtime = airtimeTxns.map((txn) => ({
       ...txn,
-      type: txn.type || "airtime recharge",
+      type: "Airtime Recharge",
       phone: txn.phone,
       network: txn.network,
     }));
 
-    // Combine and sort all
-    const allTxns = [...walletHistory, ...airtimeHistory].sort(
+    const taggedElectricity = electricityTxns.map((txn) => ({
+      ...txn,
+      type: "Electricity Purchase",
+      meter_number: txn.meter_number,
+      disco: txn.disco,
+    }));
+
+    const taggedTV = tvTxns.map((txn) => ({
+      ...txn,
+      type: "TV Subscription",
+      smartcard_number: txn.smartcard_number,
+      provider: txn.provider,
+    }));
+
+    // Merge all transactions
+    const allTxns = [...taggedAirtime, ...taggedElectricity, ...taggedTV].sort(
       (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
     );
 
-    const totalPages = Math.ceil(allTxns.length / limit);
-    const paginatedTxns = allTxns.slice(skip, skip + limit); // 👈 correct pagination here
+    const totalCount = allTxns.length;
+    const totalPages = Math.ceil(totalCount / limit);
+
+    // Apply pagination
+    const paginatedTxns = allTxns.slice(skip, skip + limit);
 
     res.json({
       transactions: paginatedTxns,
       totalPages,
       currentPage: page,
+      totalCount,
+      totalSpent,
     });
   } catch (error) {
-    console.error("Failed to fetch paginated transactions:", error.message);
+    console.error("Failed to fetch unified transactions:", error.message);
     res.status(500).json({ error: "Server error" });
   }
 });

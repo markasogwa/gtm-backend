@@ -5,7 +5,7 @@ import { handlePaystackWebhook } from "../controllers/paystackWebhookController.
 const router = express.Router();
 
 router.post(
-  "/wallet/webhook",
+  "/paystack/webhook",
   express.raw({ type: "application/json" }),
   handlePaystackWebhook
 );

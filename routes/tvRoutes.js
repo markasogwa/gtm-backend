@@ -1,6 +1,6 @@
 import express from "express";
 import {
-  buyTVSubscription,
+  buyTvSubscription,
   getTVBouquets,
 } from "../controllers/tvController.js";
 import protect from "../middleware/authMiddleware.js";
@@ -8,6 +8,6 @@ import protect from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 router.get("/", protect, getTVBouquets);
-router.post("/", protect, buyTVSubscription);
+router.post("/", protect, buyTvSubscription);
 
 export default router;

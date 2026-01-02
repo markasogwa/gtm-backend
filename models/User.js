@@ -8,11 +8,6 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, required: true },
     password: { type: String, required: true },
     isAdmin: { type: Boolean, default: false },
-    wallet: {
-      type: Number,
-      default: 0,
-      min: [0, "Wallet balance cannot be negative"],
-    },
   },
   { timestamps: true }
 );

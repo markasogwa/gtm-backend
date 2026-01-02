@@ -1,9 +1,10 @@
 import crypto from "crypto";
-import User from "../models/User.js";
-import WalletTransaction from "../models/walletTransaction.js";
+import { vtpassClient } from "../config/vtpassClient.js";
+import AirtimeTransaction from "../models/airtimeTransactions.js";
 
 export const handlePaystackWebhook = async (req, res) => {
-  console.log("👉 Webhook endpoint hit");
+  console.log("🔥 PAYSTACK WEBHOOK HIT");
+
   const secret = process.env.PAYSTACK_SECRET_KEY;
 
   const hash = crypto
@@ -18,45 +19,66 @@ export const handlePaystackWebhook = async (req, res) => {
   }
 
   const event = JSON.parse(req.body);
-  console.log("📨 Paystack event received:", event.event);
 
-  if (event.event === "charge.success") {
-    const { metadata, amount, reference } = event.data;
-    const userId = metadata.userId;
-    const amountInNaira = amount / 100;
-
-    try {
-      // Prevent duplicate funding using reference
-      const existing = await WalletTransaction.findOne({ reference });
-      if (existing) {
-        console.log("🔁 Duplicate webhook received. Ignoring.");
-        return res.status(200).send("Already processed");
-      }
-
-      // ✅ Update wallet balance
-      await User.findByIdAndUpdate(
-        userId,
-        { $inc: { wallet: amountInNaira } },
-        { new: true }
-      );
-
-      // ✅ Record the transaction
-      await WalletTransaction.create({
-        user: userId,
-        amount: amountInNaira,
-        method: "Paystack",
-        reference,
-        status: "success",
-        type: "Wallet Funding",
-      });
-
-      console.log("✅ Wallet funded for user:", userId);
-      return res.status(200).send("Success");
-    } catch (error) {
-      console.error("❌ Error processing webhook:", error.message);
-      return res.status(500).send("Internal Server Error");
-    }
+  if (event.event !== "charge.success") {
+    return res.status(200).send("Ignored");
   }
 
-  res.status(200).send("OK");
+  const { reference, amount, id: paystackTransactionId } = event.data;
+
+  try {
+    // 1️⃣ Find pending VTU transaction
+    const transaction = await AirtimeTransaction.findOne({
+      transactionId: reference,
+      status: "PENDING",
+    });
+
+    if (!transaction) {
+      // Already processed or invalid reference
+      return res.status(200).send("Already handled");
+    }
+
+    // mpney confirmed - mark as paid
+    // transaction.status = "PAID";
+    transaction.amountPaid = amount / 100;
+    transaction.paystackReference = reference;
+    transaction.paystackTransactionId = paystackTransactionId;
+    // transaction.statusHistory.push({ status: "PAID" });
+
+    await transaction.save();
+
+    // 2️⃣ Call VTPass after payment is confirmed
+    const vtpassResponse = await vtpassClient({
+      request_id: reference,
+      serviceID: transaction.serviceID,
+      phone: transaction.phone,
+      amount: transaction.amount,
+      variation_code: transaction.variation_code,
+    });
+
+    // 3️⃣ Update transaction based on VTU result
+    transaction.vtpassResponse = vtpassResponse;
+    // transaction.vtpassResponse = vtpassResponse?.request_id;
+
+    if (vtpassResponse?.code === "000") {
+      transaction.status = "SUCCESS";
+    } else {
+      transaction.status = "FAILED";
+    }
+
+    transaction.statusHistory.push({ status: transaction.status });
+
+    await transaction.save();
+
+    return res.status(200).send("Processed");
+  } catch (error) {
+    console.error("❌ Webhook processing error:", error.message);
+
+    await AirtimeTransaction.findOneAndUpdate(
+      { transactionId: reference },
+      { status: "FAILED", $push: { statusHistory: { status: "FAILED" } } }
+    );
+
+    return res.status(200).send("Failed but acknowledged");
+  }
 };

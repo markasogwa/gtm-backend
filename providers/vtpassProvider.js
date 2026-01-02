@@ -1,6 +1,3 @@
-// import dotenv from "dotenv";
-// dotenv.config();
-
 import axios from "axios";
 
 class VTPassProvider {
@@ -9,46 +6,102 @@ class VTPassProvider {
     this.baseUrl = process.env.VTPASS_SANDBOX_BASE_URL?.replace(/\/+$/, "");
     this.apiKey = process.env.VTPASS_SANDBOX_API_KEY;
     this.secretKey = process.env.VTPASS_SANDBOX_SECRET_KEY;
+
+    // Validate environment variables immediately
+    if (!this.baseUrl || !this.apiKey || !this.secretKey) {
+      throw new Error(
+        "VTPASS configuration missing! Ensure BASE_URL, API_KEY, and SECRET_KEY are set in .env"
+      );
+    }
+
     console.log("🔑 VTPASS BASE URL:", this.baseUrl);
     console.log("🔑 API KEY:", this.apiKey ? "Loaded ✅" : "Missing ❌");
     console.log("🔑 SECRET KEY:", this.secretKey ? "Loaded ✅" : "Missing ❌");
+
+    // Simple in-memory cache for service variations (optional)
+    this.serviceCache = new Map();
   }
 
   async getServiceVariations(serviceID) {
-    try {
-      const response = await axios.get(
-        `${this.baseUrl}/service-variations?serviceID=${serviceID}`,
-        {
-          headers: {
-            "api-key": this.apiKey,
-            "secret-key": this.secretKey,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-      console.log(
-        `🔗 Calling: ${this.baseUrl}/service-variations?serviceID=${serviceID}`
-      );
+    if (!serviceID) throw new Error("serviceID is required");
 
-      return response.data?.content || {};
-    } catch (err) {
-      console.error(`❌ Error fetching variations from VTPass:`, err.message);
-      throw err;
+    // Return cached variations if available
+    if (this.serviceCache.has(serviceID)) {
+      return this.serviceCache.get(serviceID);
     }
-  }
 
-  async purchaseService(payload) {
     try {
-      const response = await axios.post(`${this.baseUrl}/pay`, payload, {
+      const url = `${this.baseUrl}/service-variations?serviceID=${serviceID}`;
+      console.log(`🔗 Fetching variations from: ${url}`);
+
+      const response = await axios.get(url, {
         headers: {
           "api-key": this.apiKey,
           "secret-key": this.secretKey,
           "Content-Type": "application/json",
         },
+        timeout: 15000, // 15 seconds timeout
       });
+
+      if (response.data?.response_code !== "000") {
+        throw new Error(
+          `VTPass error: ${
+            response.data?.response_description || "Unknown error"
+          }`
+        );
+      }
+
+      const variations = response.data?.content || [];
+      // Cache variations for 10 minutes
+      this.serviceCache.set(serviceID, variations);
+      setTimeout(() => this.serviceCache.delete(serviceID), 10 * 60 * 1000);
+
+      return variations;
+    } catch (err) {
+      console.error("❌ Error fetching variations:", err.message);
+      throw err;
+    }
+  }
+
+  async purchaseService(payload) {
+    const requiredFields = [
+      "serviceID",
+      "billersCode",
+      "variation_code",
+      "amount",
+    ];
+    for (let field of requiredFields) {
+      if (!payload[field]) {
+        throw new Error(
+          `purchaseService payload missing required field: ${field}`
+        );
+      }
+    }
+
+    try {
+      const url = `${this.baseUrl}/pay`;
+      console.log(`🔗 Purchasing service at: ${url}`);
+
+      const response = await axios.post(url, payload, {
+        headers: {
+          "api-key": this.apiKey,
+          "secret-key": this.secretKey,
+          "Content-Type": "application/json",
+        },
+        timeout: 20000, // 20 seconds timeout
+      });
+
+      if (response.data?.response_code !== "000") {
+        throw new Error(
+          `VTPass purchase failed: ${
+            response.data?.response_description || "Unknown error"
+          }`
+        );
+      }
+
       return response.data;
     } catch (err) {
-      console.error(`❌ Error purchasing service from VTPass:`, err.message);
+      console.error("❌ Error purchasing service:", err.message);
       throw err;
     }
   }

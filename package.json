@@ -23,6 +23,7 @@
     "jsonwebtoken": "^9.0.2",
     "libphonenumber-js": "^1.12.10",
     "mongoose": "^8.16.4",
+    "nanoid": "^5.1.6",
     "node-cron": "^4.2.1"
   }
 }

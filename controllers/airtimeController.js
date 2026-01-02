@@ -1,14 +1,14 @@
 // controllers/airtimeController.js
-import mongoose from "mongoose";
-import { vtpassClient } from "../config/vtpassClient.js";
+import axios from "axios";
 import AirtimeTransaction from "../models/airtimeTransactions.js";
-import User from "../models/User.js"; // ✅ Replace WalletUpdate
 import generateTransactionId from "../utils/generateTransactionId.js";
-import validateNigerianPhone from "../utils/phoneValidation.js";
+// import validateNigerianPhone from "../utils/phoneValidation.js";
 
-// Recharge Airtime
 export const rechargeAirtime = async (req, res) => {
+  const PROCESSING_FEE = 50;
   const { phone, amount, network } = req.body;
+  console.log("🟢 BUY REQUEST RECEIVED:", req.body);
+
   const userId = req.user._id;
 
   if (!phone || !amount || !network) {
@@ -16,102 +16,73 @@ export const rechargeAirtime = async (req, res) => {
   }
 
   const numericAmount = Number(amount);
-  if (isNaN(numericAmount) || numericAmount <= 0) {
+  if (isNaN(numericAmount) || numericAmount < 100) {
     return res.status(400).json({ error: "Invalid amount" });
   }
 
-  const validation = validateNigerianPhone(phone);
-  if (!validation.isValid) {
-    return res.status(400).json({ error: validation.error });
-  }
+  const amountPaid = numericAmount + PROCESSING_FEE;
 
-  const formattedPhone = validation.formatted;
   const transactionId = generateTransactionId();
 
-  try {
-    // ✅ Call VTPass first
-    const responseData = await vtpassClient({
-      serviceID: network.toLowerCase(),
-      phone,
-      amount,
-      request_id: transactionId,
-    });
+  // 1️⃣ Create pending transaction
+  await AirtimeTransaction.create({
+    transactionId,
+    user: userId,
+    type: "AIRTIME",
+    network,
+    phone,
+    serviceID: network.toLowerCase(),
+    amount: numericAmount,
+    amountPaid: amountPaid, // add markup here later
+    status: "PENDING",
+  });
 
-    // ✅ If VTPass response is failed, don’t deduct
-    if (responseData.code !== "000") {
-      await AirtimeTransaction.create({
+  console.log("💳 Calling Paystack...");
+
+  // 2️⃣ Initialize Paystack
+  const paystackRes = await axios.post(
+    "https://api.paystack.co/transaction/initialize",
+    {
+      email: req.user.email,
+      amount: amountPaid * 100,
+      reference: transactionId,
+      metadata: {
         transactionId,
-        user: userId,
-        network,
         phone,
-        amount,
-        response: responseData,
-        status: "FAILED",
-        paid: false,
-      });
-
-      return res.status(400).json({
-        error: "Recharge failed",
-        vtpass: responseData,
-      });
+        network,
+      },
+      callback_url: `http://localhost:3000/payment-success?transactionId=${transactionId}`, // ✅ Add this
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+      },
     }
+  );
 
-    // ✅ If successful, now deduct and save in transaction
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
-    const user = await User.findById(userId).session(session);
-
-    if (!user || user.wallet < amount) {
-      await session.abortTransaction();
-      return res.status(400).json({ error: "Insufficient wallet balance" });
-    }
-
-    user.wallet -= amount;
-    await user.save({ session });
-
-    await AirtimeTransaction.insertMany(
-      [
-        {
-          transactionId,
-          user: userId,
-          network,
-          phone,
-          amount,
-          response: responseData,
-          status: "SUCCESS",
-          paid: true,
-        },
-      ],
-      { session }
-    );
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return res.status(200).json({ success: true, data: responseData });
-  } catch (err) {
-    console.error("❌ Recharge error:", err.response?.data || err.message);
-
-    await AirtimeTransaction.create({
-      transactionId,
-      user: userId,
-      network,
-      phone,
-      amount,
-      response: err.response?.data || err.message,
-      status: "FAILED",
-      paid: false,
-    });
-
-    return res.status(500).json({
-      error: "Airtime recharge failed",
-      details: err.response?.data || err.message,
-    });
-  }
+  return res.status(200).json({
+    success: true,
+    authorization_url: paystackRes.data.data.authorization_url,
+  });
 };
 
-// Airtime history
+export const getAirtimeTransaction = async (req, res) => {
+  const { transactionId } = req.params;
+  try {
+    const transaction = await AirtimeTransaction.findOne({
+      transactionId,
+      user: req.user._id, // ensure user owns it
+    });
+
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    res.status(200).json({ success: true, data: transaction });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch transaction" });
+  }
+};
 
 export const getAirtimeHistory = async (req, res) => {
   try {

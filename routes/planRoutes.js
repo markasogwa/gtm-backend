@@ -1,5 +1,5 @@
 import express from "express";
-import ProviderStatus from "../models/ProviderStatus.js";
+// import ProviderStatus from "../models/ProviderStatus.js";
 import { getCachedPlans } from "../services/planService.js";
 
 const router = express.Router();
@@ -14,9 +14,9 @@ router.get("/plans", async (req, res) => {
 });
 
 // get provider statuses
-router.get("/status", async (req, res) => {
-  const statuses = await ProviderStatus.find({});
-  res.json(statuses);
-});
+// router.get("/status", async (req, res) => {
+//   const statuses = await ProviderStatus.find({});
+//   res.json(statuses);
+// });
 
 export default router;

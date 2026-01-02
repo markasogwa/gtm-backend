@@ -9,6 +9,7 @@ import mongoose from "mongoose";
 // dotenv.config();
 
 // import "./cron/jobs.js"; // auto-start cron jobs
+import adminAuthRoutes from "./routes/adminAuthRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import airtimeRoutes from "./routes/airtimeRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
@@ -19,7 +20,6 @@ import paystackWebhookRoutes from "./routes/paystackWebhookRoutes.js";
 import planRoutes from "./routes/planRoutes.js";
 import transactionHistory from "./routes/tranHistoryRoutes.js";
 import tvRoutes from "./routes/tvRoutes.js";
-import walletRoutes from "./routes/wallet.js";
 
 const app = express();
 // Raw
@@ -42,6 +42,11 @@ await mongoose
   .then(() => console.log("MongoDB connected"))
   .catch((err) => console.error("MongoDB error:", err));
 
+app.use((req, res, next) => {
+  console.log("🌍 Incoming:", req.method, req.originalUrl);
+  next();
+});
+
 // Normal route handling
 app.use("/api/auth", authRoutes);
 app.use("/api/airtime", airtimeRoutes);
@@ -50,8 +55,9 @@ app.use("/api/dataplans", dataPlanRoutes);
 app.use("/api/electricity", electricityRoutes);
 app.use("/api/tv", tvRoutes);
 app.use("/api/transactions", transactionHistory);
-app.use("/api/wallet", walletRoutes);
+// app.use("/api/wallet", walletRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/auth", adminAuthRoutes);
 app.use("/api", planRoutes);
 
 // Error handler
