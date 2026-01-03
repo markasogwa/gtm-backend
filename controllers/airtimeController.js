@@ -35,6 +35,7 @@ export const rechargeAirtime = async (req, res) => {
     amount: numericAmount,
     amountPaid: amountPaid, // add markup here later
     status: "PENDING",
+    deliveryStatus: "PENDING",
   });
 
   console.log("💳 Calling Paystack...");

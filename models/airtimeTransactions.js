@@ -75,6 +75,14 @@ const airtimeTransactionSchema = new mongoose.Schema(
       default: "PENDING",
     },
 
+    // Delivery status for SME / delayed products
+    deliveryStatus: {
+      type: String,
+      enum: ["PENDING", "DELIVERED", "FAILED"],
+      default: "PENDING",
+      description: "Tracks actual product delivery from VTpass",
+    },
+
     statusHistory: [
       {
         status: String,

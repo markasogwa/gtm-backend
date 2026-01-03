@@ -30,14 +30,27 @@ router.get("/user", protect, async (req, res) => {
       TVTransaction.find({ user: req.user._id }).lean(),
     ]);
 
+    // console.log("Fetched transactions counts:", {
+    //   airtime: airtimeTxns.length,
+    //   electricity: electricityTxns.length,
+    //   tv: tvTxns.length,
+    // });
+
+    const normalizeTxn = (txn) => ({
+      ...txn,
+      status: txn.deliveryStatus, // frontend uses this
+    });
+
     // Helper to sum amounts of successful transactions
     const sumSuccessful = (txns) =>
       txns
         .filter(
           (tx) =>
-            tx.status?.toLowerCase() === "success" ||
-            tx.status?.toLowerCase() === "successful"
+            tx.status?.toLowerCase() === "paid" &&
+            (tx.status?.toLowerCase() === "success" ||
+              tx.deliveryStatus?.toLowerCase() === "delivered")
         )
+
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
     // Then compute totalSpent like this:
@@ -46,27 +59,35 @@ router.get("/user", protect, async (req, res) => {
       sumSuccessful(electricityTxns) +
       sumSuccessful(tvTxns);
 
+    // console.log("Calculated totalSpent:", totalSpent);
+
     // Tag transaction types for clarity
-    const taggedAirtime = airtimeTxns.map((txn) => ({
-      ...txn,
-      type: "Airtime Recharge",
-      phone: txn.phone,
-      network: txn.network,
-    }));
+    const taggedAirtime = airtimeTxns.map((txn) =>
+      normalizeTxn({
+        ...txn,
+        type: "Airtime Recharge",
+        phone: txn.phone,
+        network: txn.network,
+      })
+    );
 
-    const taggedElectricity = electricityTxns.map((txn) => ({
-      ...txn,
-      type: "Electricity Purchase",
-      meter_number: txn.meter_number,
-      disco: txn.disco,
-    }));
+    const taggedElectricity = electricityTxns.map((txn) =>
+      normalizeTxn({
+        ...txn,
+        type: "Electricity Purchase",
+        meter_number: txn.meter_number,
+        disco: txn.disco,
+      })
+    );
 
-    const taggedTV = tvTxns.map((txn) => ({
-      ...txn,
-      type: "TV Subscription",
-      smartcard_number: txn.smartcard_number,
-      provider: txn.provider,
-    }));
+    const taggedTV = tvTxns.map((txn) =>
+      normalizeTxn({
+        ...txn,
+        type: "TV Subscription",
+        smartcard_number: txn.smartcard_number,
+        provider: txn.provider,
+      })
+    );
 
     // Merge all transactions
     const allTxns = [...taggedAirtime, ...taggedElectricity, ...taggedTV].sort(

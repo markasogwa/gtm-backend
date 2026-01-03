@@ -50,18 +50,32 @@ export const adminController = {
     try {
       const { transactionId } = req.params;
 
-      const transaction = await Transaction.findOne({ transactionId });
+      // 1️⃣ Fetch the transaction
+      const transaction = await AirtimeTransaction.findOne({ transactionId });
       if (!transaction) {
         return res.status(404).json({ error: "Transaction not found" });
       }
 
-      if (transaction.status === "SUCCESS") {
+      // 2️⃣ Only allow retry if payment succeeded and delivery failed
+      if (!["PAID", "SUCCESS"].includes(transaction.status)) {
         return res
           .status(400)
-          .json({ error: "Transaction already successful" });
+          .json({ error: "Cannot retry: payment not completed" });
       }
 
-      // Call VTpass manually
+      if (transaction.deliveryStatus === "delivered") {
+        return res
+          .status(400)
+          .json({ error: "Cannot retry: service already delivered" });
+      }
+
+      if (transaction.deliveryStatus === "PENDING") {
+        return res
+          .status(400)
+          .json({ error: "Cannot retry: service is still pending" });
+      }
+
+      // 3️⃣ Call VTpass to actually resend the service
       const vtpassResponse = await vtpassClient({
         request_id: transaction.transactionId,
         serviceID: transaction.serviceID,
@@ -70,16 +84,22 @@ export const adminController = {
         variation_code: transaction.variation_code,
       });
 
-      transaction.vtpassResponse = vtpassResponse;
-      if (vtpassResponse?.code === "000") {
-        transaction.status = "SUCCESS";
-      } else {
-        transaction.status = "FAILED";
-      }
+      // 4️⃣ Update transaction based on VTpass response
+      transaction.status =
+        vtpassResponse?.code === "000" ? "SUCCESS" : "FAILED";
 
-      transaction.statusHistory.push({ status: transaction.status });
+      transaction.deliveryStatus =
+        vtpassResponse?.code === "000" ? "DELIVERED" : "FAILED";
+
+      transaction.statusHistory.push({
+        status: transaction.status,
+        deliveryStatus: transaction.deliveryStatus,
+        at: new Date(),
+      });
+
       await transaction.save();
 
+      // 5️⃣ Respond with updated transaction
       res.status(200).json({ success: true, data: transaction });
     } catch (error) {
       console.error("Admin retryTransaction error:", error.message);
@@ -87,33 +107,65 @@ export const adminController = {
     }
   },
 
-  // Refund a transaction manually
   refundTransaction: async (req, res) => {
     try {
       const { transactionId } = req.params;
 
-      const transaction = await Transaction.findOne({ transactionId });
+      // 1️⃣ Fetch the transaction
+      const transaction = await AirtimeTransaction.findOne({ transactionId });
       if (!transaction) {
         return res.status(404).json({ error: "Transaction not found" });
       }
 
-      if (transaction.status !== "SUCCESS") {
+      // 2️⃣ Only allow refund if payment succeeded
+      if (!["PAID", "SUCCESS"].includes(transaction.status)) {
         return res
           .status(400)
-          .json({ error: "Only successful transactions can be refunded" });
+          .json({ error: "Cannot refund: payment not completed" });
       }
 
-      // Logic to process refund via payment gateway if needed
-      // For now, just mark as REFUNDED manually
-      transaction.status = "REFUNDED";
-      transaction.statusHistory.push({ status: "REFUNDED" });
+      // 3️⃣ Refund only if delivery failed (after retry or skipped retry)
+      if (transaction.deliveryStatus !== "failed") {
+        return res
+          .status(400)
+          .json({ error: "Cannot refund: service was delivered or pending" });
+      }
 
+      // 4️⃣ Prevent double refunds
+      if (transaction.status === "REFUNDED") {
+        return res
+          .status(400)
+          .json({ error: "Transaction has already been refunded" });
+      }
+
+      // 5️⃣ Call Paystack refund API
+      const refundRes = await axios.post(
+        "https://api.paystack.co/refund",
+        {
+          transaction: transaction.paystackTransactionId, // reference or transaction id
+          amount: transaction.amountPaid * 100, // in kobo
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          },
+        }
+      );
+
+      if (!refundRes.data.status) {
+        return res.status(400).json({ error: "Refund failed at Paystack" });
+      }
+
+      // 6️⃣ Update transaction in DB
+      transaction.status = "REFUNDED";
+      transaction.statusHistory.push({ status: "REFUNDED", at: new Date() });
       await transaction.save();
 
+      // 7️⃣ Respond with updated transaction
       res.status(200).json({ success: true, data: transaction });
     } catch (error) {
-      console.error("Admin refundTransaction error:", error.message);
-      res.status(500).json({ error: "Failed to refund transaction" });
+      console.error("Refund error:", error.response?.data || error.message);
+      res.status(500).json({ error: "Failed to process refund" });
     }
   },
 };

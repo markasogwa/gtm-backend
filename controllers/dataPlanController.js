@@ -1,17 +1,120 @@
 import axios from "axios";
 
-// 🔒 Allowed service IDs for data bundles
+// 🔒 Allowed service IDs
 const VALID_SERVICES = ["mtn-data", "airtel-data", "glo-data", "etisalat-data"];
+
+// Min Plan
+const MIN_PLAN_PRICE = 100;
 
 // ⏱ Cache with expiration
 const dataPlanCache = {};
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const CACHE_DURATION = 5 * 60 * 1000;
 
-// To prevent multiple simultaneous calls
+// Prevent multiple simultaneous calls
 const ongoingRequests = {};
 
 /**
- * Get data plans from VTPass with caching
+ * Helper: determine category + filter unwanted plans
+ */
+const getPlanCategory = (plan) => {
+  const name = plan.name?.toLowerCase() || "";
+
+  // ❌ Remove high plans (2 months and above)
+  if (
+    name.includes("60 days") ||
+    name.includes("90 days") ||
+    name.includes("2-months") ||
+    name.includes("2 months") ||
+    name.includes("2-month") ||
+    name.includes("3-month") ||
+    name.includes("hour") ||
+    name.includes("sme") ||
+    name.includes("hrs") ||
+    name.includes("3-months")
+  ) {
+    return null; // filtered out
+  }
+
+  // 🕒 Hours & days → Days
+  if (
+    name.includes("1 day") ||
+    name.includes("2 days") ||
+    name.includes("3 days") ||
+    name.includes("7 days") ||
+    name.includes("14 days") ||
+    // name.includes("day") ||
+    name.includes("daily")
+  ) {
+    return "Daily";
+  }
+
+  // 📅 Weekly → Weeks
+  // if (name.includes("sme") || name.includes("7 day")) {
+  //   return "SME_Data";
+  // }
+
+  // 🗓 Monthly (only 1 month allowed)
+  if (
+    // name.includes("month") ||
+    name.includes("30 days")
+    // name.includes("monthly")
+  ) {
+    return "Monthly";
+  }
+
+  // 🎁 ExtraTalk & others
+  if (name.includes("extra") || name.includes("talk")) {
+    return "Extra_Talk";
+  }
+
+  // return "Extra_Talk";
+};
+
+/**
+ * Helper: group & sort plans
+ */
+const groupAndSortPlans = (serviceID, variations) => {
+  const network = serviceID.split("-")[0].toUpperCase();
+
+  const grouped = {
+    network,
+    categories: {
+      Daily: [],
+      // SME_Data: [],
+      Monthly: [],
+      Extra_Talk: [],
+    },
+  };
+
+  for (const plan of variations) {
+    const price = Number(plan.variation_amount || 0);
+
+    // Skip low plans
+    if (price < MIN_PLAN_PRICE) {
+      continue;
+    }
+
+    const category = getPlanCategory(plan);
+
+    // 🚫 Skip filtered plans
+    if (!category) continue;
+
+    grouped.categories[category].push({
+      ...plan,
+      price: Number(plan.variation_amount),
+    });
+  }
+
+  // 🔽 Sort each category by price
+  Object.values(grouped.categories).forEach((plans) => {
+    plans.sort((a, b) => a.price - b.price);
+  });
+
+  return grouped;
+};
+
+/**
+ * Get data plans from VTPass (grouped & filtered)
  */
 export const getDataPlans = async (req, res) => {
   const { serviceID } = req.query;
@@ -24,23 +127,20 @@ export const getDataPlans = async (req, res) => {
 
   const now = Date.now();
 
-  // ✅ Return from cache if valid
+  // ♻️ Serve from cache
   if (
     dataPlanCache[serviceID] &&
     now - dataPlanCache[serviceID].timestamp < CACHE_DURATION
   ) {
-    console.log(`♻️ Returning cached data plans for ${serviceID}`);
-    return res.json(dataPlanCache[serviceID].variations);
+    return res.json(dataPlanCache[serviceID].data);
   }
 
-  // ✅ Prevent multiple concurrent calls
+  // ⏳ Prevent concurrent fetches
   if (ongoingRequests[serviceID]) {
-    console.log(`⏳ Waiting for ongoing request for ${serviceID}`);
     await ongoingRequests[serviceID];
-    return res.json(dataPlanCache[serviceID]?.variations || []);
+    return res.json(dataPlanCache[serviceID]?.data || {});
   }
 
-  // Save promise to prevent duplicate calls
   ongoingRequests[serviceID] = (async () => {
     const baseUrl = process.env.VTPASS_SANDBOX_BASE_URL.replace(/\/+$/, "");
 
@@ -56,37 +156,29 @@ export const getDataPlans = async (req, res) => {
         }
       );
 
-      if (!response.data || !response.data.content) {
-        throw new Error("Invalid response from VTPass");
-      }
+      const variations = response.data?.content?.variations;
+      console.log("📦 RAW VTPASS PLANS:", variations);
+      if (!variations) throw new Error("Invalid response from VTPass");
 
-      const variations = response.data.content.variations || [];
+      const groupedData = groupAndSortPlans(serviceID, variations);
 
-      // ✅ Save to cache
       dataPlanCache[serviceID] = {
-        variations,
+        data: groupedData,
         timestamp: Date.now(),
       };
 
-      return variations;
-    } catch (error) {
-      console.error(
-        "❌ Error fetching plans:",
-        error.response?.data || error.message
-      );
-      throw error;
+      return groupedData;
     } finally {
-      // Remove ongoing request once done
       delete ongoingRequests[serviceID];
     }
   })();
 
   try {
-    const variations = await ongoingRequests[serviceID];
-    res.json(variations);
+    const result = await ongoingRequests[serviceID];
+    res.json(result);
   } catch (err) {
-    res
-      .status(500)
-      .json({ error: err.message || "Failed to fetch data plans" });
+    res.status(500).json({
+      error: err.message || "Failed to fetch data plans",
+    });
   }
 };

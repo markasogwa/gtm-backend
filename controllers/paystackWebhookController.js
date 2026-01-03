@@ -39,11 +39,11 @@ export const handlePaystackWebhook = async (req, res) => {
     }
 
     // mpney confirmed - mark as paid
-    // transaction.status = "PAID";
+    transaction.status = "PAID";
     transaction.amountPaid = amount / 100;
     transaction.paystackReference = reference;
     transaction.paystackTransactionId = paystackTransactionId;
-    // transaction.statusHistory.push({ status: "PAID" });
+    transaction.statusHistory.push({ status: "PAID" });
 
     await transaction.save();
 
@@ -61,12 +61,14 @@ export const handlePaystackWebhook = async (req, res) => {
     // transaction.vtpassResponse = vtpassResponse?.request_id;
 
     if (vtpassResponse?.code === "000") {
-      transaction.status = "SUCCESS";
+      transaction.deliveryStatus = "DELIVERED";
+    } else if (vtpassResponse?.code === "099") {
+      transaction.deliveryStatus = "PENDING";
     } else {
-      transaction.status = "FAILED";
+      transaction.deliveryStatus = "FAILED";
     }
 
-    transaction.statusHistory.push({ status: transaction.status });
+    transaction.statusHistory.push({ status: transaction.deliveryStatus });
 
     await transaction.save();
 
