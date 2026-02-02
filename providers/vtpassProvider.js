@@ -1,4 +1,5 @@
 import axios from "axios";
+import logger from "../logger.js";
 
 class VTPassProvider {
   constructor() {
@@ -9,30 +10,38 @@ class VTPassProvider {
 
     // Validate environment variables immediately
     if (!this.baseUrl || !this.apiKey || !this.secretKey) {
+      logger.error(
+        "VTPASS configuration missing! Ensure BASE_URL, API_KEY, and SECRET_KEY are set in .env"
+      );
+
       throw new Error(
         "VTPASS configuration missing! Ensure BASE_URL, API_KEY, and SECRET_KEY are set in .env"
       );
     }
 
-    console.log("🔑 VTPASS BASE URL:", this.baseUrl);
-    console.log("🔑 API KEY:", this.apiKey ? "Loaded ✅" : "Missing ❌");
-    console.log("🔑 SECRET KEY:", this.secretKey ? "Loaded ✅" : "Missing ❌");
+    // Log config info safely (do not log secret keys in production!)
+    logger.info(
+      { env: process.env.NODE_ENV, mode: process.env.VTPASS_ENV || "sandbox" },
+      "VTPASS initialized"
+    );
 
     // Simple in-memory cache for service variations (optional)
     this.serviceCache = new Map();
   }
 
   async getServiceVariations(serviceID) {
+    logger.warn("getServiceVariations called without serviceID");
     if (!serviceID) throw new Error("serviceID is required");
 
     // Return cached variations if available
     if (this.serviceCache.has(serviceID)) {
+      logger.debug({ serviceID }, "Returning cached service variations");
       return this.serviceCache.get(serviceID);
     }
 
     try {
       const url = `${this.baseUrl}/service-variations?serviceID=${serviceID}`;
-      console.log(`🔗 Fetching variations from: ${url}`);
+      logger.info({ url, serviceID }, "Fetching variations from VTPass");
 
       const response = await axios.get(url, {
         headers: {
@@ -44,6 +53,11 @@ class VTPassProvider {
       });
 
       if (response.data?.response_code !== "000") {
+        logger.error(
+          { responseData: response.data, serviceID },
+          "VTPass returned an error for service variations"
+        );
+
         throw new Error(
           `VTPass error: ${
             response.data?.response_description || "Unknown error"
@@ -56,9 +70,17 @@ class VTPassProvider {
       this.serviceCache.set(serviceID, variations);
       setTimeout(() => this.serviceCache.delete(serviceID), 10 * 60 * 1000);
 
+      logger.debug(
+        { serviceID, variationCount: variations.length },
+        "Service variations fetched successfully"
+      );
+
       return variations;
     } catch (err) {
-      console.error("❌ Error fetching variations:", err.message);
+      logger.error(
+        { err, serviceID },
+        "Error fetching VTPass service variations"
+      );
       throw err;
     }
   }
@@ -72,6 +94,10 @@ class VTPassProvider {
     ];
     for (let field of requiredFields) {
       if (!payload[field]) {
+        logger.warn(
+          { payload },
+          `purchaseService missing required field: ${field}`
+        );
         throw new Error(
           `purchaseService payload missing required field: ${field}`
         );
@@ -80,7 +106,10 @@ class VTPassProvider {
 
     try {
       const url = `${this.baseUrl}/pay`;
-      console.log(`🔗 Purchasing service at: ${url}`);
+      logger.info(
+        { url, payload: { ...payload, billersCode: payload.billersCode } },
+        "Purchasing service at VTPass"
+      );
 
       const response = await axios.post(url, payload, {
         headers: {
@@ -92,6 +121,11 @@ class VTPassProvider {
       });
 
       if (response.data?.response_code !== "000") {
+        logger.error(
+          { responseData: response.data, payload },
+          "VTPass purchase failed"
+        );
+
         throw new Error(
           `VTPass purchase failed: ${
             response.data?.response_description || "Unknown error"
@@ -99,9 +133,14 @@ class VTPassProvider {
         );
       }
 
+      logger.info(
+        { transactionId: response.data?.content?.transactionId, payload },
+        "VTPass purchase successful"
+      );
+
       return response.data;
     } catch (err) {
-      console.error("❌ Error purchasing service:", err.message);
+      logger.error({ err, payload }, "Error purchasing service at VTPass");
       throw err;
     }
   }
