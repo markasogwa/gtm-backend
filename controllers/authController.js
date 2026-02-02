@@ -38,13 +38,13 @@ export const register = async (req, res) => {
       .cookie("accessToken", accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "Strict",
+        sameSite: "None",
         maxAge: 15 * 60 * 1000,
       })
       .cookie("refreshToken", refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "Strict",
+        sameSite: "None",
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
@@ -96,13 +96,13 @@ export const login = async (req, res) => {
       .cookie("accessToken", accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "Strict",
+        sameSite: "None",
         maxAge: 15 * 60 * 1000,
       })
       .cookie("refreshToken", refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "Strict",
+        sameSite: "None",
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
@@ -158,7 +158,7 @@ export const refreshToken = async (req, res) => {
       .cookie("accessToken", accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "Strict",
+        sameSite: "None",
         maxAge: 15 * 60 * 1000,
       })
       .status(200)
@@ -175,12 +175,12 @@ export const logout = (req, res) => {
     .clearCookie("accessToken", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "Strict",
+      sameSite: "None",
     })
     .clearCookie("refreshToken", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "Strict",
+      sameSite: "None",
     });
 
   logger.info({ ip: req.ip }, "User logged out"); // Optional if you have req.user
