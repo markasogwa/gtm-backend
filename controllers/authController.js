@@ -8,6 +8,15 @@ import {
 } from "../utils/genToken.js";
 
 // ===================== REGISTER =====================
+// Create a reusable cookie config
+const cookieConfig = {
+  httpOnly: true,
+  secure: true, // MUST be true for sameSite: "None"
+  sameSite: "None",
+  path: "/",
+};
+
+// ===================== REGISTER =====================
 export const register = async (req, res) => {
   const { name, email, phone, password } = req.body;
 
@@ -30,39 +39,34 @@ export const register = async (req, res) => {
     }
 
     const user = await User.create({ name, email, phone, password });
-
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user._id);
 
     res
       .cookie("accessToken", accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "None",
+        ...cookieConfig,
         maxAge: 15 * 60 * 1000,
       })
       .cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "None",
+        ...cookieConfig,
         maxAge: 7 * 24 * 60 * 60 * 1000,
+      })
+      .status(201)
+      .json({
+        message: "Registration successful",
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          isAdmin: user.isAdmin,
+        },
       });
 
     logger.info(
       { userId: user._id, email: user.email, ip: req.ip },
       "User registered successfully",
     );
-
-    res.status(201).json({
-      message: "Registration successful",
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        isAdmin: user.isAdmin,
-      },
-    });
   } catch (err) {
     logger.error({ err, email, ip: req.ip }, "Registration error");
     res.status(500).json({ error: "Server error" });
@@ -78,7 +82,6 @@ export const login = async (req, res) => {
       { email, ip: req.ip, hasPassword: !!password },
       "Login attempt with missing credentials",
     );
-
     return res.status(400).json({ error: "Email and password required" });
   }
 
@@ -94,33 +97,29 @@ export const login = async (req, res) => {
 
     res
       .cookie("accessToken", accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "None",
+        ...cookieConfig,
         maxAge: 15 * 60 * 1000,
       })
       .cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "None",
+        ...cookieConfig,
         maxAge: 7 * 24 * 60 * 60 * 1000,
+      })
+      .status(200)
+      .json({
+        message: "Login successful",
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          isAdmin: user.isAdmin,
+        },
       });
 
     logger.info(
       { action: "login", userId: user._id, email: user.email, ip: req.ip },
       "User logged in successfully",
     );
-
-    res.status(200).json({
-      message: "Login successful",
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        isAdmin: user.isAdmin,
-      },
-    });
   } catch (err) {
     logger.error({ err, email }, "Login error");
     res.status(500).json({ error: "Server error" });
@@ -130,6 +129,7 @@ export const login = async (req, res) => {
 // ===================== REFRESH TOKEN =====================
 export const refreshToken = async (req, res) => {
   const token = req.cookies.refreshToken;
+
   if (!token) {
     logger.warn({ ip: req.ip }, "Refresh token missing");
     return res.status(401).json({ error: "No refresh token" });
@@ -137,11 +137,8 @@ export const refreshToken = async (req, res) => {
 
   try {
     const payload = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-    // const accessToken = generateAccessToken({
-    //   _id: payload.userId,
-    //   isAdmin: payload.isAdmin || false,
-    // });
     const user = await User.findById(payload.userId).select("_id isAdmin");
+
     if (!user) {
       logger.warn({ userId: payload.userId }, "User not found during refresh");
       return res.status(404).json({ error: "User not found" });
@@ -149,20 +146,18 @@ export const refreshToken = async (req, res) => {
 
     const accessToken = generateAccessToken(user);
 
-    logger.info(
-      { userId: payload.userId },
-      "Access token refreshed successfully",
-    );
-
     res
       .cookie("accessToken", accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "None",
+        ...cookieConfig,
         maxAge: 15 * 60 * 1000,
       })
       .status(200)
       .json({ message: "Access token refreshed" });
+
+    logger.info(
+      { userId: payload.userId },
+      "Access token refreshed successfully",
+    );
   } catch (err) {
     logger.error({ err }, "Refresh token error");
     res.status(401).json({ error: "Invalid or expired refresh token" });
@@ -172,17 +167,9 @@ export const refreshToken = async (req, res) => {
 // ===================== LOGOUT =====================
 export const logout = (req, res) => {
   res
-    .clearCookie("accessToken", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "None",
-    })
-    .clearCookie("refreshToken", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "None",
-    });
+    .clearCookie("accessToken", cookieConfig)
+    .clearCookie("refreshToken", cookieConfig)
+    .json({ message: "Logged out successfully" });
 
-  logger.info({ ip: req.ip }, "User logged out"); // Optional if you have req.user
-  res.json({ message: "Logged out successfully" });
+  logger.info({ ip: req.ip }, "User logged out");
 };
