@@ -1,5 +1,3 @@
-import axios from "axios";
-import { PAYSTACK_SECRET_KEY } from "../config/vtpassConfig.js";
 import AirtimeTransaction from "../models/airtimeTransactions.js";
 import generateTransactionId from "../utils/generateTransactionId.js";
 
@@ -43,39 +41,25 @@ export const rechargeAirtime = async (req, res) => {
 
     req.log.info(
       { userId, transactionId, amountPaid, network, phone },
-      "Pending airtime transaction created"
-    );
-
-    // 2️⃣ Initialize Paystack
-    const paystackRes = await axios.post(
-      "https://api.paystack.co/transaction/initialize",
-      {
-        email: req.user.email,
-        amount: amountPaid * 100,
-        reference: transactionId,
-        metadata: { transactionId, phone, network },
-        callback_url: `${process.env.CLIENT_URL}/payment-success?transactionId=${transactionId}`,
-      },
-      {
-        headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` },
-      }
+      "Pending airtime transaction created",
     );
 
     req.log.info(
-      {
-        userId,
-        transactionId,
-        authorizationUrl: paystackRes.data.data.authorization_url,
-      },
-      "Paystack initialization successful"
+      { userId, transactionId, email: req.user.email, amountPaid },
+      "Transaction ready for popup payment",
     );
 
     return res.status(200).json({
       success: true,
-      authorization_url: paystackRes.data.data.authorization_url,
+      reference: transactionId,
+      email: req.user.email,
+      amount: amountPaid,
     });
   } catch (err) {
-    req.log.error({ err, userId, transactionId }, "Failed to recharge airtime");
+    req.log.error(
+      { err, userId, transactionId },
+      "Failed to create transaction",
+    );
     return res
       .status(500)
       .json({ error: "Failed to process airtime recharge" });
@@ -102,7 +86,7 @@ export const getAirtimeTransaction = async (req, res) => {
   } catch (err) {
     req.log.error(
       { err, userId, transactionId },
-      "Failed to fetch transaction"
+      "Failed to fetch transaction",
     );
     return res.status(500).json({ error: "Failed to fetch transaction" });
   }
@@ -118,7 +102,7 @@ export const getAirtimeHistory = async (req, res) => {
 
     req.log.info(
       { userId, count: transactions.length },
-      "Fetched airtime transaction history"
+      "Fetched airtime transaction history",
     );
     return res.status(200).json({ success: true, data: transactions });
   } catch (err) {
