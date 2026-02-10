@@ -1,4 +1,3 @@
-import axios from "axios";
 import logger from "../logger.js"; // your Pino instance
 import AirtimeTransaction from "../models/airtimeTransactions.js";
 import generateTransactionId from "../utils/generateTransactionId.js";
@@ -47,6 +46,7 @@ export const rechargeData = async (req, res) => {
       amountPaid,
       paymentGateway: "PAYSTACK",
       status: "PENDING",
+      deliveryStatus: "PENDING", // ✅ Added for consistency
     });
 
     logger.info(
@@ -54,31 +54,17 @@ export const rechargeData = async (req, res) => {
       "Pending DATA transaction created",
     );
 
-    // 2️⃣ Initialize Paystack
-    const paystackRes = await axios.post(
-      "https://api.paystack.co/transaction/initialize",
-      {
-        email: req.user.email,
-        amount: amountPaid * 100, // Paystack uses kobo
-        reference: transactionId,
-        metadata: { transactionId, phone, network, variation_code },
-        callback_url: `http://localhost:3000/payment-success?transactionId=${transactionId}`,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        },
-      },
-    );
-
+    // 2️⃣ ✅ CHANGED: Return transaction data for popup (no Paystack API call)
     logger.info(
-      { userId, transactionId, paystackRef: paystackRes.data.data.reference },
-      "Paystack transaction initialized",
+      { userId, transactionId, email: req.user.email, amountPaid },
+      "Transaction ready for popup payment",
     );
 
     return res.status(200).json({
       success: true,
-      authorization_url: paystackRes.data.data.authorization_url,
+      reference: transactionId,
+      email: req.user.email,
+      amount: amountPaid,
     });
   } catch (err) {
     // Structured error logging
