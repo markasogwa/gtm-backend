@@ -57,7 +57,7 @@ router.get("/user", protect, async (req, res) => {
     const taggedAirtime = airtimeTxns.map((txn) =>
       normalizeTxn({
         ...txn,
-        type: "Airtime Recharge",
+        type: txn.type === "DATA" ? "Data" : "Airtime",
         phone: txn.phone,
         network: txn.network,
       }),
